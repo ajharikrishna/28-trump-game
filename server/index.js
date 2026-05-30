@@ -95,10 +95,22 @@ function emitLobby(roomId) {
 // NOTE: games_played is incremented per ROUND (not per match-series start)
 // so it matches games_won meaningfully.
 
+// Track which (roomId, gameNumber) we've already credited so we don't double-count
+const creditedRounds = new Set();
+
 async function trackRoundEnd(room, roundResult) {
   if (!roundResult) return;
   // Skip draws — neither team played a "real" winnable round
   if (roundResult.isDraw) return;
+
+  // Idempotency: never double-credit the same round of the same room
+  const gameNum = room.engine?.gameNumber ?? 0;
+  const key = `${room.roomId}:${gameNum}`;
+  if (creditedRounds.has(key)) return;
+  creditedRounds.add(key);
+  // Prevent the Set from growing forever
+  if (creditedRounds.size > 5000) creditedRounds.clear();
+
   try {
     // Increment games_played for ALL logged-in players in this round
     for (const p of room.players) {
@@ -118,6 +130,15 @@ async function trackRoundEnd(room, roundResult) {
     if (roundResult.matchOver && roundResult.matchWinner) {
       const seriesWinners = room.players.filter(p => p.team === roundResult.matchWinner && p.userId);
       for (const p of seriesWinners) await db.incrementStat(p.userId, 'series_won');
+
+      // Award match points to ALL players, capped at 12 max per player
+      const scoreA = roundResult.matchScore?.A || 0;
+      const scoreB = roundResult.matchScore?.B || 0;
+      for (const p of room.players) {
+        if (!p.userId) continue;
+        const earned = p.team === 'A' ? scoreA : scoreB;
+        await db.addMatchPoints(p.userId, earned, 12);
+      }
     }
   } catch(e) { console.error('round stat error:', e.message); }
 }
@@ -487,11 +508,84 @@ io.on('connection', (socket) => {
   });
 
   // ── NEXT ROUND ────────────────────────────────
-  socket.on('end_game', (_, callback) => {
+  // ── EMOJI REACTIONS ──────────────────────────
+  socket.on('send_emoji', ({ emoji }, callback) => {
+    const roomId = playerRooms.get(socket.id);
+    const room = getRoom(roomId);
+    if (!room) return callback?.({ error: 'Not in a room' });
+
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player) return callback?.({ error: 'Player not found' });
+
+    // Validate emoji is in allowed set
+    const ALLOWED = ['😊','😢','😠','😂','😎','😮','🔥','👏','🙄','💥'];
+    if (!ALLOWED.includes(emoji)) return callback?.({ error: 'Invalid emoji' });
+
+    // Cooldown — 2s per player
+    const now = Date.now();
+    if (!player.lastEmojiTime) player.lastEmojiTime = 0;
+    if (now - player.lastEmojiTime < 2000) {
+      return callback?.({ error: 'Too fast, slow down!' });
+    }
+    player.lastEmojiTime = now;
+
+    // Broadcast to everyone in the room
+    io.to(roomId).emit('emoji_reaction', {
+      playerId: socket.id,
+      playerName: player.name,
+      emoji,
+      time: now,
+    });
+
+    callback?.({ success: true });
+  });
+
+  // ── EMOJI REACTIONS ────────────────────────────
+  const reactionCooldowns = new Map(); // socket.id -> lastTimestamp
+  socket.on('send_reaction', ({ emoji }, callback) => {
+    const roomId = playerRooms.get(socket.id);
+    const room = getRoom(roomId);
+    if (!room) return callback?.({ error: 'Not in a room' });
+
+    // Server-side cooldown (2s) - prevents spam even from modified clients
+    const now = Date.now();
+    const last = reactionCooldowns.get(socket.id) || 0;
+    if (now - last < 2000) return callback?.({ error: 'Cooldown' });
+    reactionCooldowns.set(socket.id, now);
+
+    // Validate emoji is one of the allowed reactions
+    const allowed = ['😊','😢','😠','😂','😎','😮','🔥','👏','🙄','💥'];
+    if (!allowed.includes(emoji)) return callback?.({ error: 'Invalid emoji' });
+
+    const player = room.players.find(p => p.id === socket.id);
+    if (!player) return callback?.({ error: 'Player not found' });
+
+    io.to(roomId).emit('reaction', { playerId: socket.id, emoji });
+    callback?.({ success: true });
+  });
+
+  socket.on('end_game', async (_, callback) => {
     const roomId = playerRooms.get(socket.id);
     const room = getRoom(roomId);
     if (!room) return callback?.({ error: 'Not in a room' });
     if (room.hostId !== socket.id) return callback?.({ error: 'Only host can end the game' });
+
+    // Award partial match points ONLY if a game was in progress and NOT already completed
+    // (a naturally-finished match already awarded points via trackRoundEnd)
+    try {
+      const gs = room.getGameState();
+      const matchAlreadyEnded = gs?.phase === 'MATCH_OVER';
+      if (gs && gs.matchScore && (gs.matchScore.A > 0 || gs.matchScore.B > 0) && !matchAlreadyEnded) {
+        const scoreA = gs.matchScore.A || 0;
+        const scoreB = gs.matchScore.B || 0;
+        for (const p of room.players) {
+          if (!p.userId) continue;
+          const earned = p.team === 'A' ? scoreA : scoreB;
+          await db.addMatchPoints(p.userId, earned, 12);
+        }
+        console.log(`📊 Partial points awarded for room ${roomId} — A:${scoreA} B:${scoreB} / 12`);
+      }
+    } catch (e) { console.error('partial points error:', e.message); }
 
     // Notify all players
     io.to(roomId).emit('game_ended', { message: 'Host ended the game' });
@@ -503,6 +597,10 @@ io.on('connection', (socket) => {
       if (rid === roomId) playerRooms.delete(pid);
     });
     rooms.delete(roomId);
+    // Clear credited round tracking for this room
+    for (const k of creditedRounds) {
+      if (k.startsWith(`${roomId}:`)) creditedRounds.delete(k);
+    }
     console.log(`🛑 Host ended game in room ${roomId}`);
     callback?.({ success: true });
   });
@@ -522,6 +620,16 @@ io.on('connection', (socket) => {
       emitGameState(roomId);
     }
     if (callback) callback({ success: true });
+  });
+
+  // Host signals to advance from RoundResult (showing MVP) to MatchOver screen
+  socket.on('show_match_over', (_, callback) => {
+    const roomId = playerRooms.get(socket.id);
+    const room = getRoom(roomId);
+    if (!room) return callback?.({ error: 'Not in a room' });
+    if (room.hostId !== socket.id) return callback?.({ error: 'Only host can advance' });
+    io.to(roomId).emit('show_match_over');
+    callback?.({ success: true });
   });
 
   socket.on('next_round', (_, callback) => {

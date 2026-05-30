@@ -30,10 +30,12 @@ export default function RoundResultScreen({ result, players, isHost, onNextRound
   );
 
   const NextButton = () => isHost ? (
-    <button onClick={onNextRound} style={goldBtn}>▶ Start Next Round</button>
+    <button onClick={onNextRound} style={goldBtn}>
+      {result.matchOver ? '🏆 View Match Result' : '▶ Start Next Round'}
+    </button>
   ) : (
     <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 12, padding: '14px 28px', color: '#6b8aaa', fontSize: 14 }}>
-      ⏳ Waiting for host to start next round...
+      ⏳ Waiting for host to {result.matchOver ? 'continue' : 'start next round'}...
     </div>
   );
 

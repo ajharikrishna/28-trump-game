@@ -16,6 +16,12 @@ export function useSocket() {
   const [disconnectedPlayer, setDisconnectedPlayer] = useState(null);
   const [trumpRevealFlash, setTrumpRevealFlash] = useState(null);
   const [johnDecisionFlash, setJohnDecisionFlash] = useState(null);
+  const [matchOverSignal, setMatchOverSignal] = useState(0);
+  // reactions: { [playerId]: { emoji, time } } — keyed by player so each has only latest
+  const [reactions, setReactions] = useState({});
+  const lastReactionTimeRef = useRef(0);
+  // Live emoji reactions: { [playerId]: { emoji, time } } — each emoji shown for 2.5s
+  const [emojiReactions, setEmojiReactions] = useState({});
 
   function showNotification(message, type = 'info') {
     setNotification({ message, type, id: Date.now() });
@@ -119,6 +125,39 @@ export function useSocket() {
         setTimeout(() => setJohnDecisionFlash(null), 4000);
       });
 
+      socket.on('show_match_over', () => {
+        setMatchOverSignal(Date.now()); // trigger App to advance
+      });
+
+      socket.on('reaction', ({ playerId, emoji }) => {
+        const time = Date.now();
+        setReactions(prev => ({ ...prev, [playerId]: { emoji, time } }));
+        // Auto-clear after 3 seconds
+        setTimeout(() => {
+          setReactions(prev => {
+            if (prev[playerId]?.time !== time) return prev; // newer reaction came in
+            const { [playerId]: _, ...rest } = prev;
+            return rest;
+          });
+        }, 3000);
+      });
+
+      socket.on('emoji_reaction', ({ playerId, emoji, time }) => {
+        setEmojiReactions(prev => ({ ...prev, [playerId]: { emoji, time } }));
+        // Auto-clear after 2.5s
+        setTimeout(() => {
+          setEmojiReactions(prev => {
+            // Only clear if this is still the latest emoji for this player
+            if (prev[playerId]?.time === time) {
+              const next = { ...prev };
+              delete next[playerId];
+              return next;
+            }
+            return prev;
+          });
+        }, 2500);
+      });
+
       socket.on('game_ended', ({ message }) => {
         showNotification(message || 'Host ended the game', 'warning');
         try { localStorage.removeItem('28trump_session'); } catch(e) {}
@@ -181,6 +220,14 @@ export function useSocket() {
   const declareBlindTrump  = useCallback(()    => emit('declare_blind_trump'), [emit]);
   const playCard           = useCallback((id)  => emit('play_card',            { cardId: id }), [emit]);
   const nextRound          = useCallback(()    => emit('next_round'),          [emit]);
+  const showMatchOver      = useCallback(()    => emit('show_match_over'),     [emit]);
+  const sendReaction = useCallback((emoji) => {
+    const now = Date.now();
+    if (now - lastReactionTimeRef.current < 2000) return Promise.resolve({ error: 'cooldown' });
+    lastReactionTimeRef.current = now;
+    return emit('send_reaction', { emoji });
+  }, [emit]);
+  const sendEmoji          = useCallback((e)   => emit('send_emoji', { emoji: e }), [emit]);
   const requestMyTrump = useCallback(() => {
     return new Promise((resolve) => {
       const s = socketRef.current;
@@ -207,8 +254,11 @@ export function useSocket() {
     disconnectedPlayer, setDisconnectedPlayer,
     trumpRevealFlash,
     johnDecisionFlash,
+    matchOverSignal,
     createRoom, joinRoom, swapTeam, startGame, requestMyTrump,
     losingTeamResponse, placeBid, passBid, placeBidJohn, respondMidgameJohn,
-    selectTrump, declareBlindTrump, playCard, nextRound, exitRoom, endGame,
+    selectTrump, declareBlindTrump, playCard, nextRound, showMatchOver, exitRoom, endGame,
+    sendReaction, reactions,
+    sendEmoji, emojiReactions,
   };
 }

@@ -28,13 +28,15 @@ export default function LeaderboardScreen({ currentUserId, onBack }) {
 
         <div style={{ background: 'rgba(255,255,255,0.04)', border: `1px solid rgba(212,175,55,0.2)`, borderRadius: 16, overflow: 'hidden' }}>
           {/* Header */}
-          <div style={{ display: 'grid', gridTemplateColumns: '50px 1fr 50px 50px 50px 50px', gap: 6, padding: '12px 16px', background: 'rgba(212,175,55,0.1)', borderBottom: '1px solid rgba(212,175,55,0.2)', color: GOLD, fontSize: 11, fontWeight: 'bold', letterSpacing: 1 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr 56px 36px 36px 36px 36px 36px', gap: 3, padding: '12px 12px', background: 'rgba(212,175,55,0.1)', borderBottom: '1px solid rgba(212,175,55,0.2)', color: GOLD, fontSize: 10, fontWeight: 'bold', letterSpacing: 1 }}>
             <div>RANK</div>
             <div>PLAYER</div>
+            <div style={{ textAlign: 'center' }}>PCT %</div>
             <div style={{ textAlign: 'center' }}>🎮</div>
             <div style={{ textAlign: 'center' }}>✓</div>
-            <div style={{ textAlign: 'center' }}>⭐</div>
+            <div style={{ textAlign: 'center' }}>🎯</div>
             <div style={{ textAlign: 'center' }}>🏆</div>
+            <div style={{ textAlign: 'center' }}>⭐</div>
           </div>
 
           {loading && <div style={{ padding: 32, textAlign: 'center', color: '#8fa8c8' }}>Loading...</div>}
@@ -47,35 +49,43 @@ export default function LeaderboardScreen({ currentUserId, onBack }) {
           {players.map((p, i) => {
             const isMe = p.id === currentUserId;
             const rank = i + 1;
+            const pct = parseFloat(p.pct) || 0;
             return (
               <div key={p.id} style={{
-                display: 'grid', gridTemplateColumns: '50px 1fr 50px 50px 50px 50px', gap: 6,
-                padding: '12px 16px', alignItems: 'center',
+                display: 'grid', gridTemplateColumns: '40px 1fr 56px 36px 36px 36px 36px 36px', gap: 3,
+                padding: '12px 12px', alignItems: 'center',
                 background: isMe ? 'rgba(212,175,55,0.12)' : (i % 2 ? 'rgba(255,255,255,0.02)' : 'transparent'),
                 borderBottom: '1px solid rgba(255,255,255,0.04)',
                 borderLeft: isMe ? `3px solid ${GOLD}` : '3px solid transparent',
               }}>
-                <div style={{ fontSize: 14, fontWeight: 'bold', color: rank <= 3 ? GOLD : '#8fa8c8' }}>
+                <div style={{ fontSize: 13, fontWeight: 'bold', color: rank <= 3 ? GOLD : '#8fa8c8' }}>
                   {medal(rank)}
                 </div>
-                <div>
-                  <div style={{ color: isMe ? GOLD : '#fff', fontWeight: isMe ? 'bold' : 'normal', fontSize: 14 }}>
-                    {p.name} {isMe && <span style={{ fontSize: 11, color: GOLD }}>(You)</span>}
+                <div style={{ overflow: 'hidden' }}>
+                  <div style={{ color: isMe ? GOLD : '#fff', fontWeight: isMe ? 'bold' : 'normal', fontSize: 13, whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                    {p.name} {isMe && <span style={{ fontSize: 10, color: GOLD }}>(You)</span>}
                   </div>
-                  <div style={{ color: '#6b8aaa', fontSize: 11 }}>@{p.username}</div>
+                  <div style={{ color: '#6b8aaa', fontSize: 10 }}>
+                    @{p.username} • {p.total_points || 0}/{p.total_max_points || 0}
+                  </div>
                 </div>
-                <div style={{ textAlign: 'center', color: '#3498db', fontWeight: 'bold', fontSize: 14 }}>{p.games_played || 0}</div>
-                <div style={{ textAlign: 'center', color: '#27ae60', fontWeight: 'bold', fontSize: 14 }}>{p.games_won || 0}</div>
-                <div style={{ textAlign: 'center', color: GOLD, fontWeight: 'bold', fontSize: 14 }}>{p.mvp_count || 0}</div>
-                <div style={{ textAlign: 'center', color: '#e74c3c', fontWeight: 'bold', fontSize: 14 }}>{p.series_won || 0}</div>
+                <div style={{ textAlign: 'center', color: '#f39c12', fontWeight: 'bold', fontSize: 13 }}>
+                  {pct.toFixed(2)}
+                </div>
+                <div style={{ textAlign: 'center', color: '#3498db', fontWeight: 'bold', fontSize: 13 }}>{p.games_played || 0}</div>
+                <div style={{ textAlign: 'center', color: '#27ae60', fontWeight: 'bold', fontSize: 13 }}>{p.games_won || 0}</div>
+                <div style={{ textAlign: 'center', color: '#9b59b6', fontWeight: 'bold', fontSize: 13 }}>{p.total_points || 0}</div>
+                <div style={{ textAlign: 'center', color: '#e74c3c', fontWeight: 'bold', fontSize: 13 }}>{p.series_won || 0}</div>
+                <div style={{ textAlign: 'center', color: GOLD, fontWeight: 'bold', fontSize: 13 }}>{p.mvp_count || 0}</div>
               </div>
             );
           })}
         </div>
 
         <div style={{ marginTop: 16, padding: '12px 16px', background: 'rgba(0,0,0,0.2)', borderRadius: 10, color: '#6b8aaa', fontSize: 11, lineHeight: 1.7 }}>
-          <div>🎮 Games Played &nbsp; ✓ Games Won &nbsp; ⭐ MVP &nbsp; 🏆 Series (12 pts)</div>
-          <div style={{ marginTop: 4 }}>Ranked by: Series Won → Games Won → MVP → Games Played</div>
+          <div>PCT% = Points won ÷ Points available × 100 (WTC-style)</div>
+          <div>🎮 Games Played &nbsp;✓ Games Won &nbsp;🎯 Total Points &nbsp;🏆 Series (12 pts) &nbsp;⭐ MVP</div>
+          <div style={{ marginTop: 4 }}>Ranked by: PCT% → Series Won → Total Points → Games Won → MVP</div>
         </div>
       </div>
     </div>

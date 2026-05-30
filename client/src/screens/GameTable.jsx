@@ -9,7 +9,7 @@ const SUIT_COLORS = {
   spades: '#fff', clubs: '#fff',
 };
 
-export default function GameTable({ gameState, myHand, playerId, onPlayCard, onRequestMyTrump, isHost, onEndGame, onExitGame, trumpRevealFlash, connected }) {
+export default function GameTable({ gameState, myHand, playerId, onPlayCard, onRequestMyTrump, isHost, onEndGame, onExitGame, trumpRevealFlash, connected, emojiReactions = {}, onSendEmoji }) {
   const gs = gameState;
   const [myRevealedTrump, setMyRevealedTrump] = React.useState(null);
 
@@ -128,19 +128,19 @@ export default function GameTable({ gameState, myHand, playerId, onPlayCard, onR
 
         {/* Top player */}
         <div style={{ display: 'flex', justifyContent: 'center', padding: '8px 0 0' }}>
-          <PlayerSeat player={orderedPlayers[2]} isCurrentTurn={gs.currentTurnPlayerId === orderedPlayers[2]?.id} isTrumpPicker={gs.trump?.trumpPickerPlayerId === orderedPlayers[2]?.id} />
+          <PlayerSeat player={orderedPlayers[2]} isCurrentTurn={gs.currentTurnPlayerId === orderedPlayers[2]?.id} isTrumpPicker={gs.trump?.trumpPickerPlayerId === orderedPlayers[2]?.id} emoji={emojiReactions[orderedPlayers[2]?.id]} />
         </div>
 
         {/* Middle row: left player, felt table, right player */}
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 8px' }}>
-          <PlayerSeat player={orderedPlayers[1]} isCurrentTurn={gs.currentTurnPlayerId === orderedPlayers[1]?.id} vertical isTrumpPicker={gs.trump?.trumpPickerPlayerId === orderedPlayers[1]?.id} />
+          <PlayerSeat player={orderedPlayers[1]} isCurrentTurn={gs.currentTurnPlayerId === orderedPlayers[1]?.id} vertical isTrumpPicker={gs.trump?.trumpPickerPlayerId === orderedPlayers[1]?.id} emoji={emojiReactions[orderedPlayers[1]?.id]} />
           <FeltTable gs={gs} orderedPlayers={orderedPlayers} />
-          <PlayerSeat player={orderedPlayers[3]} isCurrentTurn={gs.currentTurnPlayerId === orderedPlayers[3]?.id} vertical isTrumpPicker={gs.trump?.trumpPickerPlayerId === orderedPlayers[3]?.id} />
+          <PlayerSeat player={orderedPlayers[3]} isCurrentTurn={gs.currentTurnPlayerId === orderedPlayers[3]?.id} vertical isTrumpPicker={gs.trump?.trumpPickerPlayerId === orderedPlayers[3]?.id} emoji={emojiReactions[orderedPlayers[3]?.id]} />
         </div>
 
         {/* Bottom: my info */}
         <div style={{ padding: '0 8px 2px', display: 'flex', justifyContent: 'center' }}>
-          <PlayerSeat player={orderedPlayers[0]} isCurrentTurn={isMyTurn} isMe isTrumpPicker={gs.trump?.trumpPickerPlayerId === orderedPlayers[0]?.id} />
+          <PlayerSeat player={orderedPlayers[0]} isCurrentTurn={isMyTurn} isMe isTrumpPicker={gs.trump?.trumpPickerPlayerId === orderedPlayers[0]?.id} emoji={emojiReactions[orderedPlayers[0]?.id]} />
         </div>
       </div>
 
@@ -230,7 +230,17 @@ export default function GameTable({ gameState, myHand, playerId, onPlayCard, onR
           from { transform: scale(1.1) translateY(-10px); }
           to   { transform: scale(1) translateY(0); }
         }
+        @keyframes emojiPop {
+          0%   { opacity: 0; transform: scale(0.3) translateY(10px); }
+          15%  { opacity: 1; transform: scale(1.4) translateY(-4px); }
+          30%  { transform: scale(1) translateY(0); }
+          75%  { opacity: 1; transform: scale(1) translateY(-2px); }
+          100% { opacity: 0; transform: scale(0.8) translateY(-12px); }
+        }
       `}</style>
+
+      {/* Emoji reaction picker */}
+      <EmojiPicker onSend={onSendEmoji} />
 
       {canShowTrump && ReactDOM.createPortal(
         <div style={{
@@ -366,7 +376,7 @@ function FeltTable({ gs, orderedPlayers }) {
 }
 
 // ─── PLAYER SEAT ─────────────────────────────────────────────
-function PlayerSeat({ player, isCurrentTurn, isMe, vertical, isTrumpPicker }) {
+function PlayerSeat({ player, isCurrentTurn, isMe, vertical, isTrumpPicker, emoji }) {
   if (!player) return <div style={{ width: vertical ? 60 : 120 }} />;
 
   const teamColor = player.team === 'A' ? '#3498db' : '#e74c3c';
@@ -381,6 +391,16 @@ function PlayerSeat({ player, isCurrentTurn, isMe, vertical, isTrumpPicker }) {
       <div style={{ position: 'relative' }}>
         {isTrumpPicker && (
           <div style={{ position: 'absolute', top: -16, left: '50%', transform: 'translateX(-50%)', fontSize: 16, zIndex: 5, lineHeight: 1 }}>👑</div>
+        )}
+        {emoji && (
+          <div style={{
+            position: 'absolute', top: -24, right: -22, zIndex: 10,
+            fontSize: 28, lineHeight: 1,
+            animation: 'emojiPop 2.5s ease-out forwards',
+            filter: 'drop-shadow(0 2px 6px rgba(0,0,0,0.6))',
+          }}>
+            {emoji.emoji}
+          </div>
         )}
         <div style={{
           width: 44, height: 44, borderRadius: '50%',
@@ -540,3 +560,65 @@ function getTableOrder(players, myId) {
 const SUIT_SYMBOLS = {
   spades: '♠', hearts: '♥', diamonds: '♦', clubs: '♣',
 };
+
+function EmojiPicker({ onSend }) {
+  const [open, setOpen] = React.useState(false);
+  const [cooldown, setCooldown] = React.useState(false);
+  const EMOJIS = ['😊', '😢', '😠', '😂', '😎', '😮', '🔥', '👏', '🙄', '💥'];
+
+  const send = (emoji) => {
+    if (cooldown) return;
+    onSend?.(emoji);
+    setCooldown(true);
+    setOpen(false);
+    setTimeout(() => setCooldown(false), 2000);
+  };
+
+  return ReactDOM.createPortal(
+    <div style={{ position: 'fixed', bottom: 'calc(env(safe-area-inset-bottom, 0px) + 110px)', left: 12, zIndex: 9990 }}>
+      {open && (
+        <div style={{
+          position: 'absolute', bottom: 56, left: 0,
+          background: 'rgba(13, 33, 55, 0.96)',
+          border: '1px solid rgba(212,175,55,0.4)',
+          borderRadius: 16, padding: 10,
+          boxShadow: '0 8px 28px rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(10px)',
+          display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 4,
+          minWidth: 220,
+        }}>
+          {EMOJIS.map(e => (
+            <button key={e} onClick={() => send(e)} disabled={cooldown}
+              style={{
+                background: 'rgba(255,255,255,0.06)', border: 'none',
+                borderRadius: 10, padding: '8px 6px', fontSize: 24,
+                cursor: cooldown ? 'wait' : 'pointer',
+                opacity: cooldown ? 0.5 : 1,
+                transition: 'all 0.15s',
+              }}
+              onMouseDown={(ev) => ev.currentTarget.style.transform = 'scale(0.85)'}
+              onMouseUp={(ev) => ev.currentTarget.style.transform = 'scale(1)'}
+              onMouseLeave={(ev) => ev.currentTarget.style.transform = 'scale(1)'}
+            >
+              {e}
+            </button>
+          ))}
+        </div>
+      )}
+      <button onClick={() => setOpen(o => !o)} disabled={cooldown}
+        style={{
+          width: 46, height: 46, borderRadius: '50%',
+          background: cooldown ? 'rgba(192,57,43,0.3)' : 'rgba(212,175,55,0.2)',
+          border: `1px solid ${cooldown ? '#c0392b' : 'rgba(212,175,55,0.5)'}`,
+          fontSize: 22, cursor: cooldown ? 'wait' : 'pointer',
+          boxShadow: '0 4px 14px rgba(0,0,0,0.4)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}
+        title={cooldown ? 'Wait...' : 'React'}
+      >
+        {cooldown ? '⏳' : (open ? '✕' : '😊')}
+      </button>
+    </div>,
+    document.body
+  );
+}

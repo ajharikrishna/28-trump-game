@@ -34,8 +34,16 @@ const CREATE_TABLE_SQL = `
     games_won INTEGER DEFAULT 0,
     mvp_count INTEGER DEFAULT 0,
     series_won INTEGER DEFAULT 0,
+    total_points INTEGER DEFAULT 0,
+    total_max_points INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT NOW()
   );
+`;
+
+// Add columns to existing tables (no-op if already there)
+const MIGRATE_SQL = `
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS total_points INTEGER DEFAULT 0;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS total_max_points INTEGER DEFAULT 0;
 `;
 
 let tableReady = false;
@@ -48,6 +56,7 @@ async function initDatabase(retries = 5, delayMs = 3000) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       await pool.query(CREATE_TABLE_SQL);
+      await pool.query(MIGRATE_SQL);
       tableReady = true;
       console.log(`✅ Database initialized (users table ready) — attempt ${attempt}`);
       return;
@@ -65,6 +74,7 @@ async function initDatabase(retries = 5, delayMs = 3000) {
 async function ensureTable() {
   if (tableReady) return;
   await pool.query(CREATE_TABLE_SQL);
+  await pool.query(MIGRATE_SQL);
   tableReady = true;
 }
 
@@ -74,7 +84,7 @@ async function createUser({ name, username, mobile, passwordHash }) {
   const result = await pool.query(
     `INSERT INTO users (name, username, mobile, password_hash)
      VALUES ($1, $2, $3, $4)
-     RETURNING id, name, username, mobile, games_played, games_won, mvp_count, series_won`,
+     RETURNING id, name, username, mobile, games_played, games_won, mvp_count, series_won, total_points, total_max_points`,
     [name, username, mobile, passwordHash]
   );
   return result.rows[0];
@@ -92,7 +102,7 @@ async function findUserByLogin(login) {
 
 async function findUserById(id) {
   const result = await pool.query(
-    `SELECT id, name, username, mobile, games_played, games_won, mvp_count, series_won, created_at
+    `SELECT id, name, username, mobile, games_played, games_won, mvp_count, series_won, total_points, total_max_points, created_at
      FROM users WHERE id = $1`,
     [id]
   );
@@ -111,7 +121,7 @@ async function updateUser(id, { name, username, mobile, passwordHash }) {
   values.push(id);
   const result = await pool.query(
     `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx}
-     RETURNING id, name, username, mobile, games_played, games_won, mvp_count, series_won`,
+     RETURNING id, name, username, mobile, games_played, games_won, mvp_count, series_won, total_points, total_max_points`,
     values
   );
   return result.rows[0];
@@ -124,16 +134,35 @@ async function incrementStat(userId, stat, amount = 1) {
     await pool.query(`UPDATE users SET ${stat} = ${stat} + $1 WHERE id = $2`, [amount, userId]);
   } catch (err) {
     console.error(`⚠️  incrementStat(${stat}) failed for user ${userId}: ${err.message}`);
-    // don't throw — stat updates are non-critical
+  }
+}
+
+// Add points earned and max possible points for a match (for PCT calculation)
+async function addMatchPoints(userId, pointsEarned, maxPoints) {
+  if (!userId || maxPoints <= 0) return;
+  try {
+    await pool.query(
+      `UPDATE users SET total_points = total_points + $1, total_max_points = total_max_points + $2 WHERE id = $3`,
+      [pointsEarned, maxPoints, userId]
+    );
+  } catch (err) {
+    console.error(`⚠️  addMatchPoints failed for user ${userId}: ${err.message}`);
   }
 }
 
 async function getLeaderboard(limit = 50) {
   await ensureTable();
   const result = await pool.query(
-    `SELECT id, name, username, games_played, games_won, mvp_count, series_won
+    `SELECT id, name, username, games_played, games_won, mvp_count, series_won,
+            total_points, total_max_points,
+            CASE
+              WHEN total_max_points > 0
+                THEN ROUND((total_points::numeric / total_max_points::numeric) * 100, 2)
+              ELSE 0
+            END AS pct
      FROM users
-     ORDER BY series_won DESC, games_won DESC, mvp_count DESC, games_played DESC
+     WHERE total_max_points > 0 OR games_played > 0
+     ORDER BY pct DESC, series_won DESC, total_points DESC, games_won DESC, mvp_count DESC
      LIMIT $1`,
     [limit]
   );
@@ -143,5 +172,5 @@ async function getLeaderboard(limit = 50) {
 module.exports = {
   pool, initDatabase, ensureTable,
   createUser, findUserByLogin, findUserById, updateUser,
-  incrementStat, getLeaderboard,
+  incrementStat, addMatchPoints, getLeaderboard,
 };

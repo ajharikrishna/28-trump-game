@@ -68,6 +68,12 @@ export default function ProfileScreen({ user: initialUser, onUpdate, onBack, onL
             <Stat label="Games Won" value={user.games_won} color="#27ae60" />
             <Stat label="MVP Awards" value={user.mvp_count} color={GOLD} icon="⭐" />
             <Stat label="Series Won" value={user.series_won} color="#e74c3c" icon="🏆" />
+            <Stat label="Total Points" value={user.total_points || 0} color="#9b59b6" icon="🎯" />
+            <Stat label="PCT %"
+              value={user.total_max_points > 0
+                ? ((user.total_points / user.total_max_points) * 100).toFixed(2)
+                : '0.00'}
+              color="#f39c12" icon="📊" />
           </div>
         </div>
 

@@ -80,6 +80,12 @@ function GameApp() {
   // Store round result in a ref so it NEVER gets cleared by re-renders
   const roundResultRef = useRef(null);
   const [showResult, setShowResult] = useState(false);
+  const [matchOverConfirmed, setMatchOverConfirmed] = useState(false);
+
+  // Listen for broadcast that everyone should advance to MatchOver
+  useEffect(() => {
+    if (socket.matchOverSignal > 0) setMatchOverConfirmed(true);
+  }, [socket.matchOverSignal]);
 
   const gs = socket.gameState;
   const { disconnectedPlayer, setDisconnectedPlayer, exitRoom } = socket;
@@ -168,19 +174,9 @@ function GameApp() {
       </div>
     );
 
-    if (gs.phase === 'MATCH_OVER') {
-      return (
-        <MatchOverScreen
-          matchScore={gs.matchScore}
-          players={gs.players}
-          onNewGame={handleNextRound}
-        />
-      );
-    }
-
-    // Show round result — check phase directly so rejoin always shows it
+    // Show round result FIRST — even on the final match-winning round, so MVP is visible
     const resultData = roundResultRef.current || gs.roundResult;
-    if ((gs.phase === 'ROUND_RESULT' || showResult) && resultData) {
+    if ((gs.phase === 'ROUND_RESULT' || gs.phase === 'MATCH_OVER' || showResult) && resultData && !matchOverConfirmed) {
       roundResultRef.current = resultData; // keep ref in sync
       const isHost = gs.players?.find(p => p.id === socket.playerId)?.position === 0;
       return (
@@ -188,9 +184,24 @@ function GameApp() {
           result={resultData}
           players={gs.players}
           isHost={isHost}
-          onNextRound={handleNextRound}
+          onNextRound={resultData.matchOver
+            ? () => socket.showMatchOver()   // broadcast — everyone advances to MatchOver
+            : handleNextRound}
           onExitGame={() => { socket.exitRoom(); setScreen('HOME'); }}
           onEndGame={() => socket.endGame()}
+        />
+      );
+    }
+
+    if (gs.phase === 'MATCH_OVER') {
+      return (
+        <MatchOverScreen
+          matchScore={gs.matchScore}
+          players={gs.players}
+          onNewGame={() => { setMatchOverConfirmed(false); handleNextRound(); }}
+          onExitGame={() => { socket.exitRoom(); setScreen('HOME'); }}
+          onEndGame={() => socket.endGame()}
+          isHost={gs.players?.find(p => p.id === socket.playerId)?.position === 0}
         />
       );
     }
@@ -225,6 +236,8 @@ function GameApp() {
         onEndGame={() => socket.endGame()}
         onExitGame={() => { socket.exitRoom(); setScreen('HOME'); }}
         trumpRevealFlash={socket.trumpRevealFlash}
+        emojiReactions={socket.reactions}
+        onSendEmoji={socket.sendReaction}
         connected={socket.connected}
       />
     );
